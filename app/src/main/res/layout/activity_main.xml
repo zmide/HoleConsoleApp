@@ -4,6 +4,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="#F5F5F5"
     android:orientation="vertical"
     android:padding="15dp"
     tools:context=".MainActivity">
@@ -14,16 +15,31 @@
         android:layout_marginBottom="10dp"
         android:text="Hello Hole Console" />
 
-    <Button
-        android:id="@+id/a_main_getlist"
-        android:layout_width="wrap_content"
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="获取信息列表" />
+        android:orientation="vertical">
+
+        <Button
+            android:id="@+id/a_main_getlist"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="获取信息列表" />
+
+        <ListView
+            android:id="@+id/a_main_devtools_list"
+            android:layout_width="match_parent"
+            android:layout_height="80dp" />
+
+    </LinearLayout>
+
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="20dp"
+        android:background="#FFF"
+        android:gravity="end"
         android:orientation="horizontal">
 
         <EditText
@@ -47,24 +63,34 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="20dp"
-        android:orientation="horizontal">
+        android:layout_weight="1"
+        android:background="#FFF"
+        android:orientation="vertical">
 
-        <EditText
-            android:id="@+id/a_main_domain_rule"
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="#FFF"
-            android:layout_weight="1"
-            android:text="https://*/foo\\*"
-            android:hint="域名匹配规则"
-            android:minWidth="100dp"
-            android:padding="10dp" />
+            android:gravity="center"
+            android:orientation="horizontal">
 
-        <Button
-            android:id="@+id/a_main_match_test"
-            android:layout_width="wrap_content"
+            <View
+                android:layout_width="wrap_content"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <Button
+                android:id="@+id/a_main_add_script"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="添加脚本" />
+
+        </LinearLayout>
+
+        <ListView
+            android:id="@+id/a_main_script_list"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="匹配" />
+            android:layout_weight="1" />
 
     </LinearLayout>
 

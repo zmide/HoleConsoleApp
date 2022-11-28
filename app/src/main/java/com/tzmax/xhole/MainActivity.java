@@ -1,20 +1,25 @@
 package com.tzmax.xhole;
 
-import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
-import android.content.DialogInterface;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.LocalSocket;
 import android.net.LocalSocketAddress;
+import android.net.Uri;
 import android.os.Bundle;
 
 import androidx.appcompat.app.AppCompatActivity;
 
-import android.util.ArrayMap;
 import android.util.Log;
+import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
+import android.widget.AdapterView;
+import android.widget.BaseAdapter;
 import android.widget.Button;
-import android.widget.EditText;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.navigation.ui.AppBarConfiguration;
@@ -22,8 +27,11 @@ import androidx.navigation.ui.AppBarConfiguration;
 import com.google.common.reflect.TypeToken;
 import com.google.gson.Gson;
 import com.tzmax.xhole.databinding.ActivityMainBinding;
+import com.tzmax.xhole.databinding.ItemScriptBinding;
 import com.tzmax.xhole.utils.DevtoolsInfoNode;
+import com.tzmax.xhole.utils.DevtoolsUnixListAdapter;
 import com.tzmax.xhole.utils.IOUtils;
+import com.tzmax.xhole.utils.ScriptContent;
 import com.tzmax.xhole.utils.Utils;
 
 import java.io.IOException;
@@ -34,12 +42,8 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketAddress;
 import java.net.SocketTimeoutException;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -91,6 +95,7 @@ public class MainActivity extends AppCompatActivity {
                 // connectADBServer();
 
                 List<String> list = getDevtoolsUnix();
+                loadDevtoolsUnix(list);
 
                 for (String item : list) {
                     Log.d(TAG, "getDevtoolsUnix item: " + item);
@@ -127,71 +132,38 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // 测试域名匹配
-        binding.aMainMatchTest.setOnClickListener(new View.OnClickListener() {
+        // 绑定添加脚本按钮点击事件
+        binding.aMainAddScript.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                String ruleStr = binding.aMainDomainRule.getText().toString();
-                if (ruleStr.equals("")) {
-                    toast("域名匹配规则不得为空。");
-                    return;
-                }
+                Intent intent = new Intent(MainActivity.this, CompileActivity.class);
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                intent.putExtra("index", -1);
+                startActivity(intent);
+            }
+        });
 
-                EditText mDomain = new EditText(mContext);
-                mDomain.setText("https://example.com/foo/bar.html");
-                mDomain.setHint("请输入测试 url");
+        loadScriptList();
 
-                AlertDialog dialog = new AlertDialog.Builder(mContext).create();
-                dialog.setTitle("测试 URL 匹配规则");
-                dialog.setMessage("匹配规则：" + ruleStr);
-                dialog.setView(mDomain);
-                dialog.setButton(AlertDialog.BUTTON_POSITIVE, "测试", new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int which) {
+    }
 
-                    }
-                });
-                dialog.show();
-                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(new View.OnClickListener() {
-                    @Override
-                    public void onClick(View v) {
-                        // 匹配规则
-                        String domainStr = mDomain.getText().toString();
-                        if (domainStr.equals("")) {
-                            toast("测试 URL 不得为空。");
-                            return;
-                        }
+    // 加载脚本列表
+    private void loadScriptList() {
+        if (binding == null) {
+            return;
+        }
 
-                        boolean isMatch = urlRoutingMatch(ruleStr, domainStr);
-                        if (isMatch) {
-                            toast(domainStr + " 匹配成功。");
-                        } else {
-                            toast(domainStr + "匹配失败。");
-                        }
-                    }
-                });
+        List<ScriptContent> scriptContents = BaseApplication.application.localReadScriptContent();
+        ScriptListAdapter adapter = new ScriptListAdapter(mContext, scriptContents);
+
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                binding.aMainScriptList.setAdapter(adapter);
             }
         });
     }
 
-    // URL 路由匹配模式
-    // 参考链接：https://developer.chrome.com/docs/extensions/mv3/match_patterns/
-    private boolean urlRoutingMatch(String ruleStr, String domainStr) {
-        boolean is = false;
-
-        // 替换规则中 * 符号为正则 .* 匹配符号
-        ruleStr = ruleStr.replaceAll("(?<=[^\\\\])\\*", "\\.*");
-
-        // 通过正则判断是否匹配
-        try {
-            if (Pattern.compile(ruleStr).matcher(domainStr).matches()) {
-                is = true;
-            }
-        } catch (Exception e) {
-        }
-
-        return is;
-    }
 
     // 启动扫描服务
     private void startScanThread(int port) {
@@ -248,7 +220,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         // 判断调试页面信息是否有更新
-        String jsonStrHash = md5(jsonStr);
+        String jsonStrHash = Utils.md5(jsonStr);
         if (jsonStrHash.equals(serviceInfoMD5Hash)) {
             return;
         }
@@ -341,26 +313,6 @@ public class MainActivity extends AppCompatActivity {
         return isAlive;
     }
 
-    public static String md5(String content) {
-        byte[] hash;
-        try {
-            hash = MessageDigest.getInstance("MD5").digest(content.getBytes("UTF-8"));
-        } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException("NoSuchAlgorithmException", e);
-        } catch (UnsupportedEncodingException e) {
-            throw new RuntimeException("UnsupportedEncodingException", e);
-        }
-
-        StringBuilder hex = new StringBuilder(hash.length * 2);
-        for (byte b : hash) {
-            if ((b & 0xFF) < 0x10) {
-                hex.append("0");
-            }
-            hex.append(Integer.toHexString(b & 0xFF));
-        }
-        return hex.toString();
-    }
-
     // 启动转发
     private String forwardUnixServer(String domain, String port) {
         return "http://127.0.0.1:" + port;
@@ -400,6 +352,41 @@ public class MainActivity extends AppCompatActivity {
         }
 
         return devtools;
+    }
+
+    // 加载  devtools unix domain 列表
+    private void loadDevtoolsUnix(List<String> data) {
+        if (binding == null) {
+            return;
+        }
+
+        DevtoolsUnixListAdapter adapter = new DevtoolsUnixListAdapter(mContext, data);
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                binding.aMainDevtoolsList.setAdapter(adapter);
+                binding.aMainDevtoolsList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+                    @Override
+                    public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                        ClipData mClipData = ClipData.newPlainText("shell", data.get(position));
+                        cm.setPrimaryClip(mClipData);
+                        toast("指令已复制。");
+                    }
+                });
+
+                binding.aMainDevtoolsList.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
+                    @Override
+                    public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
+                        // TODO:: 实现长按可以弹窗自定义需要复制的命令
+                        toast("自定义命令功能正在开发。");
+                        return true;
+                    }
+                });
+            }
+        });
+
+        toast("devtools unix 列表加载完成。");
     }
 
     private CMDResult runCmd(String cmdStr) {
@@ -570,6 +557,80 @@ public class MainActivity extends AppCompatActivity {
             e.printStackTrace();
         }
         return null;
+    }
+
+    public class ScriptListAdapter extends BaseAdapter {
+
+        private Context mContext;
+        private List<ScriptContent> data;
+
+        public ScriptListAdapter(Context mContext, List<ScriptContent> data) {
+            this.mContext = mContext;
+            this.data = data;
+        }
+
+        @Override
+        public int getCount() {
+            return data.size();
+        }
+
+        @Override
+        public Object getItem(int position) {
+            return data.get(position);
+        }
+
+        @Override
+        public long getItemId(int position) {
+            return position;
+        }
+
+        @Override
+        public View getView(int position, View convertView, ViewGroup parent) {
+            ScriptContent content = data.get(position);
+            ItemScriptBinding binding = ItemScriptBinding.inflate(LayoutInflater.from(mContext));
+            if (content == null || content.name == null || content.urlRule == null || content.scriptContent == null) {
+                return new View(mContext);
+            }
+
+            binding.iScriptName.setText(content.name);
+            binding.iScriptRule.setText(content.urlRule);
+            if (content.author != null) {
+                binding.iScriptAuthor.setText("@" + content.author);
+            } else {
+                binding.iScriptAuthor.setText("@本地用户");
+            }
+
+
+            binding.iScriptAuthor.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (content.website != null) {
+                        Uri uri = Uri.parse(content.website);
+                        Intent intent = new Intent(Intent.ACTION_VIEW, uri);
+                        startActivity(intent);
+                    }
+                }
+            });
+
+
+            binding.iScriptBox.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    gotoCompile(position);
+                }
+            });
+
+            return binding.getRoot();
+        }
+
+        // 跳转脚本编辑页面
+        private void gotoCompile(int index) {
+            Intent intent = new Intent(mContext, CompileActivity.class);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            intent.putExtra("index", index);
+            mContext.startActivity(intent);
+        }
+
     }
 
 }
