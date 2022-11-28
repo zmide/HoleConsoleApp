@@ -275,6 +275,8 @@ public class CompileActivity extends AppCompatActivity {
     // 显示编辑脚本名称弹窗
     private void showSaveDialog() {
 
+        Log.d(TAG, "showSaveDialog: " + scriptIndex);
+
         EditText mName = new EditText(mContext);
         mName.setHint("请输入脚本名称");
         if (scriptObj.name != null) {

@@ -1,6 +1,8 @@
 package com.tzmax.xhole.utils;
 
+import android.app.AlertDialog;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.net.Uri;
 import android.view.LayoutInflater;
@@ -8,6 +10,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
 
+import com.tzmax.xhole.BaseApplication;
 import com.tzmax.xhole.CompileActivity;
 import com.tzmax.xhole.databinding.ItemScriptBinding;
 
@@ -17,6 +20,7 @@ public class ScriptListAdapter extends BaseAdapter {
 
     private Context mContext;
     private List<ScriptContent> data;
+    private ScriptListEventNotice eventNotice;
 
     public ScriptListAdapter(Context mContext, List<ScriptContent> data) {
         this.mContext = mContext;
@@ -74,7 +78,40 @@ public class ScriptListAdapter extends BaseAdapter {
             }
         });
 
+        // 长按删除脚本
+        binding.iScriptBox.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override
+            public boolean onLongClick(View v) {
+                shewDeleteScriptDialog(position);
+                return true;
+            }
+        });
+
         return binding.getRoot();
+    }
+
+    // 显示删除脚本弹窗
+    private void shewDeleteScriptDialog(int index) {
+        AlertDialog.Builder dialog = new AlertDialog.Builder(mContext);
+        dialog.setTitle("注意");
+        dialog.setMessage("删除脚本后不可恢复，你确定要删除吗？");
+        dialog.setNegativeButton("取消", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                dialog.cancel();
+            }
+        });
+        dialog.setPositiveButton("删除", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                BaseApplication.application.localSaveScriptContent(index, null);
+                if (eventNotice != null) {
+                    // 调用删除脚本事件监听回调
+                    eventNotice.onDeleteScript();
+                }
+            }
+        });
+        dialog.show();
     }
 
     // 跳转脚本编辑页面
@@ -83,6 +120,15 @@ public class ScriptListAdapter extends BaseAdapter {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         intent.putExtra("index", index);
         mContext.startActivity(intent);
+    }
+
+    // 设置列表事件监听回调
+    public void setScriptListEventNotice(ScriptListEventNotice eventNotice) {
+        this.eventNotice = eventNotice;
+    }
+
+    public interface ScriptListEventNotice {
+        void onDeleteScript();
     }
 
 }

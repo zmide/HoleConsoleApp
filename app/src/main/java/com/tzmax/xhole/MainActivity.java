@@ -87,6 +87,15 @@ public class MainActivity extends AppCompatActivity {
         initView();
     }
 
+    @Override
+    protected void onStart() {
+        super.onStart();
+        if (binding == null) {
+            return;
+        }
+        loadScriptList(); // 刷新脚本列表
+    }
+
     private void initView() {
         if (binding == null) {
             return;
@@ -153,8 +162,6 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        loadScriptList();
-
     }
 
     // 加载脚本列表
@@ -165,6 +172,13 @@ public class MainActivity extends AppCompatActivity {
 
         List<ScriptContent> scriptContents = BaseApplication.application.localReadScriptContent();
         ScriptListAdapter adapter = new ScriptListAdapter(mContext, scriptContents);
+        adapter.setScriptListEventNotice(new ScriptListAdapter.ScriptListEventNotice() {
+            @Override
+            public void onDeleteScript() {
+                // 列表调用删除脚本后触发刷新数据
+                loadScriptList();
+            }
+        });
 
         runOnUiThread(new Runnable() {
             @Override

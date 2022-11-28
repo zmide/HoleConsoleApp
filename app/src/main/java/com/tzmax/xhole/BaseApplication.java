@@ -97,7 +97,7 @@ public class BaseApplication extends Application {
             scriptContents.add(script);
         } else if (index > 0 && index <= scriptContents.size()) {
             // 更新脚本
-            scriptContents.add(index, script);
+            scriptContents.set(index, script);
         } else {
             // 参数不合规
             return;
