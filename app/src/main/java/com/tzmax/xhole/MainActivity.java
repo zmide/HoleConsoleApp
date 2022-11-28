@@ -10,6 +10,8 @@ import android.net.LocalSocketAddress;
 import android.net.Uri;
 import android.os.Bundle;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 
 import android.util.Log;
@@ -26,12 +28,17 @@ import androidx.navigation.ui.AppBarConfiguration;
 
 import com.google.common.reflect.TypeToken;
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.tzmax.xhole.databinding.ActivityMainBinding;
 import com.tzmax.xhole.databinding.ItemScriptBinding;
+import com.tzmax.xhole.protocol.Command;
+import com.tzmax.xhole.protocol.ParamsBean;
+import com.tzmax.xhole.protocol.RuntimeEvaluate;
 import com.tzmax.xhole.utils.DevtoolsInfoNode;
 import com.tzmax.xhole.utils.DevtoolsUnixListAdapter;
 import com.tzmax.xhole.utils.IOUtils;
 import com.tzmax.xhole.utils.ScriptContent;
+import com.tzmax.xhole.utils.ScriptListAdapter;
 import com.tzmax.xhole.utils.Utils;
 
 import java.io.IOException;
@@ -52,6 +59,9 @@ import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
+import okhttp3.WebSocket;
+import okhttp3.WebSocketListener;
+import okio.ByteString;
 import rikka.shizuku.Shizuku;
 import rikka.shizuku.ShizukuRemoteProcess;
 import rikka.sui.Sui;
@@ -164,7 +174,6 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-
     // 启动扫描服务
     private void startScanThread(int port) {
         String host = "127.0.0.1";
@@ -241,11 +250,28 @@ public class MainActivity extends AppCompatActivity {
 
     private void matchInjectionScript(List<DevtoolsInfoNode> nodes) {
         // 遍历判断是否需要注入脚本
+        List<ScriptContent> scriptContents = BaseApplication.application.localReadScriptContent();
+
         Log.d(TAG, "matchInjectionScript: 开始注入");
         for (DevtoolsInfoNode node : nodes) {
             // TODO:: 待实现
 
             Log.d(TAG, "matchInjectionScript: " + node.webSocketDebuggerUrl);
+
+            // 遍历脚本列表
+            for (ScriptContent script : scriptContents) {
+                // 跳过异常的脚本
+                if (script == null || script.urlRule == null || script.scriptContent == null) {
+                    continue;
+                }
+
+                // 匹配脚本规则
+                if (Utils.urlRoutingMatch(script.urlRule, node.url)) {
+                    // 需要执行脚本
+                    connectServiceExecutionScript(node, script);
+                }
+            }
+
             // 通过与 webSocketDebuggerUrl 建立连接发送命令
 
             // 1.先发送
@@ -279,6 +305,86 @@ public class MainActivity extends AppCompatActivity {
             */
 
         }
+    }
+
+    // 连接服务并执行脚本
+    private void connectServiceExecutionScript(DevtoolsInfoNode devtools, ScriptContent script) {
+        OkHttpClient mClient = new OkHttpClient.Builder()
+                .pingInterval(10, TimeUnit.SECONDS)
+                .build();
+        Request request = new Request.Builder()
+                .url(devtools.webSocketDebuggerUrl)
+                .build();
+        WebSocket mWebSocket = mClient.newWebSocket(request, new WebSocketListener() {
+            @Override
+            public void onClosed(@NonNull WebSocket webSocket, int code, @NonNull String reason) {
+                super.onClosed(webSocket, code, reason);
+                Log.d(TAG, "webSocket onClosed");
+            }
+
+            @Override
+            public void onClosing(@NonNull WebSocket webSocket, int code, @NonNull String reason) {
+                super.onClosing(webSocket, code, reason);
+                Log.d(TAG, "webSocket onClosing");
+            }
+
+            @Override
+            public void onFailure(@NonNull WebSocket webSocket, @NonNull Throwable t, @Nullable Response response) {
+                super.onFailure(webSocket, t, response);
+                if (t != null) {
+                    Log.e(TAG, "webSocket onFailure: ", t);
+                    return;
+                }
+                Log.d(TAG, "webSocket onFailure: " + response.body());
+            }
+
+            @Override
+            public void onMessage(@NonNull WebSocket webSocket, @NonNull String text) {
+                super.onMessage(webSocket, text);
+                Log.d(TAG, "webSocket onMessage: " + text);
+            }
+
+            @Override
+            public void onMessage(@NonNull WebSocket webSocket, @NonNull ByteString bytes) {
+                super.onMessage(webSocket, bytes);
+            }
+
+            @Override
+            public void onOpen(@NonNull WebSocket webSocket, @NonNull Response response) {
+                super.onOpen(webSocket, response);
+                Log.d(TAG, "webSocket onOpen: " + response.body());
+
+                GsonBuilder gsonBuilder = new GsonBuilder();
+                gsonBuilder.serializeNulls();
+                Gson gson = gsonBuilder.create();
+
+                // 连接成功时发送
+
+                // 1. 发送 Runtime.enable 指令
+                Command commandRuntimeEnable = new Command();
+                commandRuntimeEnable.method = "Runtime.enable";
+                commandRuntimeEnable.id = 1;
+                commandRuntimeEnable.params = null;
+
+                String msg = gson.toJson(commandRuntimeEnable);
+                Log.d(TAG, "onOpen: " + msg);
+                webSocket.send(msg);
+
+                // 2. 发送 Runtime.evaluate 指令
+                Command commandRuntimeEvaluate = new Command();
+                commandRuntimeEvaluate.method = "Runtime.evaluate";
+                commandRuntimeEvaluate.id = 2;
+                commandRuntimeEvaluate.params = new RuntimeEvaluate(script.scriptContent);
+                msg = gson.toJson(commandRuntimeEvaluate);
+                Log.d(TAG, "onOpen: " + msg);
+                webSocket.send(msg);
+
+                // webSocket.cancel(); // 断开连接
+
+                // 关闭连接池
+                // mClient.dispatcher().executorService().shutdown();
+            }
+        });
     }
 
     private void toast(String msg) {
@@ -557,80 +663,6 @@ public class MainActivity extends AppCompatActivity {
             e.printStackTrace();
         }
         return null;
-    }
-
-    public class ScriptListAdapter extends BaseAdapter {
-
-        private Context mContext;
-        private List<ScriptContent> data;
-
-        public ScriptListAdapter(Context mContext, List<ScriptContent> data) {
-            this.mContext = mContext;
-            this.data = data;
-        }
-
-        @Override
-        public int getCount() {
-            return data.size();
-        }
-
-        @Override
-        public Object getItem(int position) {
-            return data.get(position);
-        }
-
-        @Override
-        public long getItemId(int position) {
-            return position;
-        }
-
-        @Override
-        public View getView(int position, View convertView, ViewGroup parent) {
-            ScriptContent content = data.get(position);
-            ItemScriptBinding binding = ItemScriptBinding.inflate(LayoutInflater.from(mContext));
-            if (content == null || content.name == null || content.urlRule == null || content.scriptContent == null) {
-                return new View(mContext);
-            }
-
-            binding.iScriptName.setText(content.name);
-            binding.iScriptRule.setText(content.urlRule);
-            if (content.author != null) {
-                binding.iScriptAuthor.setText("@" + content.author);
-            } else {
-                binding.iScriptAuthor.setText("@本地用户");
-            }
-
-
-            binding.iScriptAuthor.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    if (content.website != null) {
-                        Uri uri = Uri.parse(content.website);
-                        Intent intent = new Intent(Intent.ACTION_VIEW, uri);
-                        startActivity(intent);
-                    }
-                }
-            });
-
-
-            binding.iScriptBox.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    gotoCompile(position);
-                }
-            });
-
-            return binding.getRoot();
-        }
-
-        // 跳转脚本编辑页面
-        private void gotoCompile(int index) {
-            Intent intent = new Intent(mContext, CompileActivity.class);
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            intent.putExtra("index", index);
-            mContext.startActivity(intent);
-        }
-
     }
 
 }
