@@ -1,41 +1,53 @@
 package com.tzmax.xhole;
 
+import android.app.AlertDialog;
+import android.content.Context;
+import android.content.DialogInterface;
 import android.content.pm.PackageManager;
-import android.net.LocalServerSocket;
 import android.net.LocalSocket;
 import android.net.LocalSocketAddress;
-import android.os.Build;
 import android.os.Bundle;
-
-import com.google.android.material.snackbar.Snackbar;
 
 import androidx.appcompat.app.AppCompatActivity;
 
+import android.util.ArrayMap;
 import android.util.Log;
-import android.util.Patterns;
 import android.view.View;
 import android.widget.Button;
+import android.widget.EditText;
+import android.widget.Toast;
 
-import androidx.navigation.NavController;
-import androidx.navigation.Navigation;
 import androidx.navigation.ui.AppBarConfiguration;
-import androidx.navigation.ui.NavigationUI;
 
-import com.google.common.io.ByteStreams;
+import com.google.common.reflect.TypeToken;
+import com.google.gson.Gson;
 import com.tzmax.xhole.databinding.ActivityMainBinding;
+import com.tzmax.xhole.utils.DevtoolsInfoNode;
 import com.tzmax.xhole.utils.IOUtils;
 import com.tzmax.xhole.utils.Utils;
 
 import java.io.IOException;
 import java.io.*;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
+import java.lang.reflect.Type;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.net.SocketAddress;
+import java.net.SocketTimeoutException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import moe.shizuku.server.IRemoteProcess;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
 import rikka.shizuku.Shizuku;
 import rikka.shizuku.ShizukuRemoteProcess;
 import rikka.sui.Sui;
@@ -47,10 +59,15 @@ public class MainActivity extends AppCompatActivity {
     private ActivityMainBinding binding;
     private final Shizuku.OnRequestPermissionResultListener REQUEST_PERMISSION_RESULT_LISTENER = this::onRequestPermissionsResult;
 
+    private Thread scanThread; // 调试服务扫描线程
+    private boolean scanThreadState = false;
+
+    Context mContext;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        mContext = this;
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
         initView();
@@ -71,6 +88,8 @@ public class MainActivity extends AppCompatActivity {
                 Log.d(TAG, "onClick: ");
                 // runLocalServer();
 
+                // connectADBServer();
+
                 List<String> list = getDevtoolsUnix();
 
                 for (String item : list) {
@@ -88,6 +107,258 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         });
+
+        binding.aMainStart.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                // 获取端口号
+                String port = binding.aMainPort.getText().toString();
+                if (port == "" || port.equals("")) {
+                    toast("服务端口号不得为空");
+                    return;
+                }
+                int portInt = Integer.parseInt(port);
+                if (portInt <= 0) {
+                    toast("服务端口号不在正确范围");
+                    return;
+                }
+
+                startScanThread(portInt);
+            }
+        });
+
+        // 测试域名匹配
+        binding.aMainMatchTest.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String ruleStr = binding.aMainDomainRule.getText().toString();
+                if (ruleStr.equals("")) {
+                    toast("域名匹配规则不得为空。");
+                    return;
+                }
+
+                EditText mDomain = new EditText(mContext);
+                mDomain.setText("https://example.com/foo/bar.html");
+                mDomain.setHint("请输入测试 url");
+
+                AlertDialog dialog = new AlertDialog.Builder(mContext).create();
+                dialog.setTitle("测试 URL 匹配规则");
+                dialog.setMessage("匹配规则：" + ruleStr);
+                dialog.setView(mDomain);
+                dialog.setButton(AlertDialog.BUTTON_POSITIVE, "测试", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+
+                    }
+                });
+                dialog.show();
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        // 匹配规则
+                        String domainStr = mDomain.getText().toString();
+                        if (domainStr.equals("")) {
+                            toast("测试 URL 不得为空。");
+                            return;
+                        }
+
+                        boolean isMatch = urlRoutingMatch(ruleStr, domainStr);
+                        if (isMatch) {
+                            toast(domainStr + " 匹配成功。");
+                        } else {
+                            toast(domainStr + "匹配失败。");
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    // URL 路由匹配模式
+    // 参考链接：https://developer.chrome.com/docs/extensions/mv3/match_patterns/
+    private boolean urlRoutingMatch(String ruleStr, String domainStr) {
+        boolean is = false;
+
+        // 替换规则中 * 符号为正则 .* 匹配符号
+        ruleStr = ruleStr.replaceAll("(?<=[^\\\\])\\*", "\\.*");
+
+        // 通过正则判断是否匹配
+        try {
+            if (Pattern.compile(ruleStr).matcher(domainStr).matches()) {
+                is = true;
+            }
+        } catch (Exception e) {
+        }
+
+        return is;
+    }
+
+    // 启动扫描服务
+    private void startScanThread(int port) {
+        String host = "127.0.0.1";
+        if (scanThread != null) {
+            // scanThread 扫描线程不为空，先停止线程然后清空线程
+            scanThreadState = false; // 动态关闭线程
+            try {
+                scanThread.interrupt();
+                scanThread.stop();
+            } catch (Exception e) {
+            }
+            scanThread = null;
+        }
+
+        scanThreadState = true; // 动态打开线程
+        scanThread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                boolean isSocketAlive = false;
+                while (scanThreadState) {
+
+                    while (!isSocketAlive) {
+                        // 循环监听端口是否开放
+                        isSocketAlive = isSocketAliveUtility(host, port);
+                    }
+
+                    // 端口开放，调用获取调试页面信息
+                    try {
+                        checkServiceInfo(host, port);
+                    } catch (Exception e) {
+                        // 获取页面调试信息错误，继续等待
+                        Log.e(TAG, "run: 获取页面调试信息错误", e);
+                    }
+
+                }
+            }
+        });
+        scanThread.start(); // 启动线程
+    }
+
+    // 查询服务信息
+    OkHttpClient client = new OkHttpClient().newBuilder().connectTimeout(1, TimeUnit.SECONDS).readTimeout(1, TimeUnit.SECONDS).build();
+    Gson gson = new Gson();
+    String serviceInfoMD5Hash = "";
+
+    private void checkServiceInfo(String host, int port) throws IOException {
+        MediaType mediaType = MediaType.parse("application/json");
+        Request request = new Request.Builder().url("http://" + host + ":" + port + "/json").method("GET", null).build();
+        Response response = client.newCall(request).execute();
+        String jsonStr = response.body().string();
+        if (jsonStr.equals("")) {
+            throw new IOException("checkServiceInfo is error: " + jsonStr);
+        }
+
+        // 判断调试页面信息是否有更新
+        String jsonStrHash = md5(jsonStr);
+        if (jsonStrHash.equals(serviceInfoMD5Hash)) {
+            return;
+        }
+        serviceInfoMD5Hash = jsonStrHash;
+        Log.d(TAG, "checkServiceInfo: " + jsonStr);
+
+        Type type = new TypeToken<ArrayList<DevtoolsInfoNode>>() {
+        }.getType();
+        List<DevtoolsInfoNode> nodes = gson.fromJson(jsonStr, type);
+        if (nodes.size() <= 0) {
+            return;
+        }
+
+        // 开始匹配注入脚本
+        matchInjectionScript(nodes);
+
+    }
+
+    private void matchInjectionScript(List<DevtoolsInfoNode> nodes) {
+        // 遍历判断是否需要注入脚本
+        Log.d(TAG, "matchInjectionScript: 开始注入");
+        for (DevtoolsInfoNode node : nodes) {
+            // TODO:: 待实现
+
+            Log.d(TAG, "matchInjectionScript: " + node.webSocketDebuggerUrl);
+            // 通过与 webSocketDebuggerUrl 建立连接发送命令
+
+            // 1.先发送
+            /*
+            {
+                "method": "Runtime.enable",
+                    "params": {},
+                "id": 1
+            }
+            */
+
+            // 2.然后执行脚本命令
+            /*
+            {
+                "method": "Runtime.evaluate",
+                    "params": {
+                "expression": "$x('//*[@id=\"form1help\"]/div[2]/div/input[1]')[0].value = \"testwwww\"",
+                        "objectGroup": "console",
+                        "includeCommandLineAPI": true,
+                        "silent": false,
+                        "returnByValue": false,
+                        "generatePreview": true,
+                        "userGesture": true,
+                        "awaitPromise": false,
+                        "replMode": true,
+                        "allowUnsafeEvalBlockedByCSP": false,
+                        "uniqueContextId": "1184210416429498045.4629085721122142521"
+            },
+                "id": 1
+            }
+            */
+
+        }
+    }
+
+    private void toast(String msg) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                Toast.makeText(getBaseContext(), msg, Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    // 检查端口是否开放
+    public static boolean isSocketAliveUtility(String hostName, int port) {
+        boolean isAlive = false;
+        SocketAddress socketAddress = new InetSocketAddress(hostName, port);
+        Socket socket = new Socket();
+
+        int timeout = 1000; // 超时时间
+        try {
+            socket.connect(socketAddress, timeout);
+            socket.close();
+            isAlive = true;
+        } catch (SocketTimeoutException exception) {
+            // 超时
+            Log.d(TAG, "isSocketAliveUtility: 超时" + exception.getMessage());
+            isAlive = false;
+        } catch (IOException exception) {
+            // 其他异常
+            Log.d(TAG, "isSocketAliveUtility: 失败" + exception.getMessage());
+            isAlive = false;
+        }
+        return isAlive;
+    }
+
+    public static String md5(String content) {
+        byte[] hash;
+        try {
+            hash = MessageDigest.getInstance("MD5").digest(content.getBytes("UTF-8"));
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("NoSuchAlgorithmException", e);
+        } catch (UnsupportedEncodingException e) {
+            throw new RuntimeException("UnsupportedEncodingException", e);
+        }
+
+        StringBuilder hex = new StringBuilder(hash.length * 2);
+        for (byte b : hash) {
+            if ((b & 0xFF) < 0x10) {
+                hex.append("0");
+            }
+            hex.append(Integer.toHexString(b & 0xFF));
+        }
+        return hex.toString();
     }
 
     // 启动转发
@@ -232,6 +503,73 @@ public class MainActivity extends AppCompatActivity {
         public void setStdOut(String stdOut) {
             this.stdOut = stdOut;
         }
+    }
+
+    private void connectADBServer() {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+//                StringBuffer callbackStr = shellExec("sh cd / && sh ls \n");
+//                Log.d(TAG, "run: callbackStr" + callbackStr);
+                Process p = null;
+                try {
+                    p = Runtime.getRuntime().exec("ls");
+                    String data = null;
+                    BufferedReader ie = new BufferedReader(new InputStreamReader(p.getErrorStream()));
+                    BufferedReader in = new BufferedReader(new InputStreamReader(p.getInputStream()));
+                    String error = null;
+                    while ((error = ie.readLine()) != null && !error.equals("null")) {
+                        data += error + "\n";
+                    }
+                    String line = null;
+                    while ((line = in.readLine()) != null && !line.equals("null")) {
+                        data += line + "\n";
+                    }
+                    Log.d(TAG, "run: 执行成功 " + line);
+                } catch (IOException e) {
+                    Log.e(TAG, "run: 执行失败", e);
+                    e.printStackTrace();
+                }
+
+            }
+        }).start();
+    }
+
+    // 执行 Shell
+    public static StringBuffer shellExec(String cmd) {
+        Runtime mRuntime = Runtime.getRuntime(); //执行命令的方法
+        try {
+            //Process中封装了返回的结果和执行错误的结果
+            Process mProcess = mRuntime.exec(cmd); //加入参数
+            //使用BufferReader缓冲各个字符，实现高效读取
+            //InputStreamReader将执行命令后得到的字节流数据转化为字符流
+            //mProcess.getInputStream()获取命令执行后的的字节流结果
+            BufferedReader mReader = new BufferedReader(new InputStreamReader(mProcess.getInputStream()));
+            //实例化一个字符缓冲区
+            StringBuffer mRespBuff = new StringBuffer();
+            //实例化并初始化一个大小为1024的字符缓冲区，char类型
+            char[] buff = new char[1024];
+            int ch = 0;
+            //read()方法读取内容到buff缓冲区中，大小为buff的大小，返回一个整型值，即内容的长度
+            //如果长度不为null
+            while ((ch = mReader.read(buff)) != -1) {
+                //就将缓冲区buff的内容填进字符缓冲区
+                mRespBuff.append(buff, 0, ch);
+            }
+            //结束缓冲
+            mReader.close();
+            Log.i("shell", "shellExec: " + mRespBuff);
+            //弹出结果
+//            Log.i("shell", "执行命令: " + cmd + "执行成功");
+            return mRespBuff;
+
+        } catch (IOException e) {
+            // 异常处理
+            // TODO Auto-generated catch block
+            Log.e(TAG, "shellExec: ", e);
+            e.printStackTrace();
+        }
+        return null;
     }
 
 }

@@ -29,11 +29,11 @@ public class WebviewService extends IWebview.Stub {
     }
 
     static {
-        try {
-            Runtime.getRuntime().exec("cat /proc/net/unix | grep --text  _devtools_remote");
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+//        try {
+//            Runtime.getRuntime().exec("cat /proc/net/unix | grep --text  _devtools_remote");
+//        } catch (IOException e) {
+//            e.printStackTrace();
+//        }
 //        System.loadLibrary("hello-jni");
     }
 

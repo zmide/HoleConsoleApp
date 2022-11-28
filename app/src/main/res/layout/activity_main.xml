@@ -20,4 +20,52 @@
         android:layout_height="wrap_content"
         android:text="获取信息列表" />
 
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:orientation="horizontal">
+
+        <EditText
+            android:id="@+id/a_main_port"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="#FFF"
+            android:hint="端口"
+            android:minWidth="100dp"
+            android:padding="10dp" />
+
+        <Button
+            android:id="@+id/a_main_start"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="扫描" />
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:orientation="horizontal">
+
+        <EditText
+            android:id="@+id/a_main_domain_rule"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="#FFF"
+            android:layout_weight="1"
+            android:text="https://*/foo\\*"
+            android:hint="域名匹配规则"
+            android:minWidth="100dp"
+            android:padding="10dp" />
+
+        <Button
+            android:id="@+id/a_main_match_test"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="匹配" />
+
+    </LinearLayout>
+
 </LinearLayout>
