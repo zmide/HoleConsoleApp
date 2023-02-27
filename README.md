@@ -10,3 +10,7 @@
 <https://github.com/ChromeDevTools/awesome-chrome-devtools>
 
 <https://chromedevtools.github.io/devtools-protocol/>
+
+<https://chromium.googlesource.com/devtools/devtools-frontend/+/refs/heads/main/docs/architecture_of_devtools.md>
+
+<https://developer.android.com/studio/command-line/adb?hl=zh-cn>

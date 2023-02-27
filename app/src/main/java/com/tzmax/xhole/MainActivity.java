@@ -14,6 +14,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 
+import android.system.ErrnoException;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -112,23 +113,32 @@ public class MainActivity extends AppCompatActivity {
                 // runLocalServer();
 
                 // connectADBServer();
+                Thread taskRuntime = new Thread(() -> {
+                    try {
+                        List<String> list = getDevtoolsUnix();
 
-                List<String> list = getDevtoolsUnix();
-                loadDevtoolsUnix(list);
+                        runOnUiThread(() -> {
+                            loadDevtoolsUnix(list);
+                        });
 
-                for (String item : list) {
-                    Log.d(TAG, "getDevtoolsUnix item: " + item);
-                    // forwardUnixServer(item);
+                        for (String item : list) {
+                            Log.d(TAG, "getDevtoolsUnix item: " + item);
+                            // forwardUnixServer(item);
+                        }
 
-                }
+                        if (list.size() > 0) {
+                            Log.d(TAG, "onClick: 开始连接");
 
-                if (list.size() > 0) {
-                    Log.d(TAG, "onClick: 开始连接");
+                            String server_api = forwardUnixServer(list.get(0)); // 转发调试连接
+                            Log.d(TAG, "Server API:" + server_api);
+                            // runLocalServer(list.get(0));
+                        }
+                    } catch (Exception e) {
+                    }
+                });
 
-                    String server_api = forwardUnixServer(list.get(0)); // 转发调试连接
-                    Log.d(TAG, "Server API:" + server_api);
-                    // runLocalServer(list.get(0));
-                }
+                taskRuntime.start();
+
             }
         });
 
@@ -516,6 +526,13 @@ public class MainActivity extends AppCompatActivity {
         StringBuilder stdErrSb = new StringBuilder();
         try {
             String[] cmd = new String[]{"sh", "-c", cmdStr};
+
+            int isPermission = Shizuku.checkSelfPermission();
+            if (isPermission != PackageManager.PERMISSION_GRANTED) {
+                toast("未获取 Shizuku 授权");
+                throw new ErrnoException("not permission", 404);
+            }
+
             ShizukuRemoteProcess process = Shizuku.newProcess(cmd, null, null);
 
             Thread stdOutD = IOUtils.writeStreamToStringBuilder(stdOutSb, process.getInputStream());
@@ -535,8 +552,8 @@ public class MainActivity extends AppCompatActivity {
 
             result = new CMDResult(code, errStr, outStr);
 
-        } catch (InterruptedException e) {
-            e.printStackTrace();
+        } catch (Exception e) {
+            // e.printStackTrace();
         }
 
         return result;
